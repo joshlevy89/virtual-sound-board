@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Annotation App</title>
+    <style>
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .image-container {
+            position: relative;
+            display: inline-block;
+            margin: 20px;
+        }
+        #uploaded-image {
+            max-width: 800px;
+            max-height: 600px;
+        }
+        #drawing-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+        }
+        .audio-panel {
+            width: 300px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+        .audio-list {
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .audio-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 3px;
+        }
+        .recording {
+            background: #ffe0e0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Annotation App</h1>
+    
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" id="image-input" accept="image/*">
+        <button type="submit">Upload Image</button>
+    </form>
+
+    <div class="container">
+        <div class="image-container">
+            <img id="uploaded-image" style="display: none;">
+            <canvas id="drawing-canvas"></canvas>
+        </div>
+
+        <div class="audio-panel">
+            <h3>Audio Clips</h3>
+            <div>
+                <input type="text" id="audio-name" placeholder="Audio clip name">
+                <button id="record-button">Record</button>
+                <span id="recording-status"></span>
+            </div>
+            <div class="audio-list" id="audio-list">
+                <!-- Audio clips will be added here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="audio-selection-dialog" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 1px solid #ccc; box-shadow: 0 0 10px rgba(0,0,0,0.2); z-index: 1000;">
+        <h3>Select Audio for Box</h3>
+        <select id="audio-select"></select>
+        <div style="margin-top: 10px;">
+            <button id="confirm-audio">Confirm</button>
+            <button id="cancel-box">Cancel</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
