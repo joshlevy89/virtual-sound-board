@@ -1,20 +1,35 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Image Annotation App</title>
+    <title>Virtual Sound Board</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
         .container {
             display: flex;
             gap: 20px;
+            width: 100%;
         }
         .image-container {
             position: relative;
             display: inline-block;
-            margin: 20px;
+            flex: 3;
+            margin: 0;
+            width: 75%;
         }
         #uploaded-image {
-            max-width: 800px;
-            max-height: 600px;
+            width: 100%;
+            height: auto;
+            max-width: none;
+            max-height: none;
         }
         #drawing-canvas {
             position: absolute;
@@ -23,10 +38,12 @@
             cursor: crosshair;
         }
         .audio-panel {
-            width: 300px;
+            flex: 1;
+            width: 25%;
             padding: 20px;
             background: #f5f5f5;
             border-radius: 5px;
+            min-width: 250px;
         }
         .audio-list {
             margin-top: 20px;
@@ -45,14 +62,52 @@
         .recording {
             background: #ffe0e0;
         }
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .image-container, .audio-panel {
+                flex: none;
+                width: 100%;
+            }
+            
+            #uploaded-image {
+                max-width: 100%;
+                height: auto;
+            }
+            
+            .audio-panel {
+                width: 100%;
+                box-sizing: border-box;
+            }
+            
+            #audio-selection-dialog {
+                width: 90%;
+                max-width: 300px;
+            }
+            
+            input[type="text"],
+            button {
+                padding: 12px;
+                font-size: 16px;
+            }
+        }
+        .tagline {
+            text-align: center;
+            color: #666;
+            margin-top: -20px;
+            margin-bottom: 30px;
+        }
     </style>
 </head>
 <body>
-    <h1>Image Annotation App</h1>
+    <h1>Virtual Sound Board</h1>
+    <p class="tagline">Upload an image, draw regions, assign sounds, and have fun pressing them!</p>
     
     <form id="upload-form" enctype="multipart/form-data">
-        <input type="file" id="image-input" accept="image/*">
-        <button type="submit">Upload Image</button>
+        <input type="file" id="image-input" accept="image/*" style="display: none;">
+        <button type="button" id="choose-file-btn">Choose File</button>
     </form>
 
     <div class="container">

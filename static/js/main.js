@@ -7,6 +7,11 @@ let recordedAudios = [];
 let isRecording = false;
 let currentBoxIndex = null;
 
+// Add touch detection
+const isTouchDevice = ('ontouchstart' in window) || 
+                     (navigator.maxTouchPoints > 0) ||
+                     (navigator.msMaxTouchPoints > 0);
+
 document.getElementById('upload-form').addEventListener('submit', function(e) {
     e.preventDefault();
     
@@ -53,43 +58,120 @@ async function toggleRecording() {
         }
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
+            // Reset mediaRecorder and chunks before starting new recording
+            mediaRecorder = null;
             audioChunks = [];
 
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.log('Got media stream:', stream);
+            
+            // Try different MIME types for better mobile compatibility
+            const mimeTypes = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/ogg;codecs=opus'
+            ];
+            
+            let options;
+            for (const mimeType of mimeTypes) {
+                if (MediaRecorder.isTypeSupported(mimeType)) {
+                    options = { mimeType };
+                    console.log('Using MIME type:', mimeType);
+                    break;
+                }
+            }
+            
+            mediaRecorder = new MediaRecorder(stream, options);
+            console.log('MediaRecorder created:', mediaRecorder);
+            
+            // Set up all event handlers before starting
             mediaRecorder.ondataavailable = (event) => {
-                audioChunks.push(event.data);
+                console.log('Data available event, size:', event.data.size);
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
             };
 
             mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/m4a' });
-                const audioUrl = URL.createObjectURL(audioBlob);
+                console.log('MediaRecorder stopped, chunks:', audioChunks);
                 
+                const audioBlob = new Blob(audioChunks, { type: options.mimeType || 'audio/webm' });
+                console.log('Created audio blob, size:', audioBlob.size);
+                
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audioName = nameInput.value.trim();
+                
+                // Add to recordedAudios array
                 recordedAudios.push({
-                    name: nameInput.value,
-                    url: audioUrl
+                    name: audioName,
+                    url: audioUrl,
+                    blob: audioBlob
                 });
-
-                addAudioToList(nameInput.value, audioUrl);
+                
+                // Create audio element
+                const audioElement = document.createElement('div');
+                audioElement.className = 'audio-item';
+                
+                const label = document.createElement('span');
+                label.textContent = audioName;
+                
+                const audio = document.createElement('audio');
+                audio.controls = true;
+                audio.src = audioUrl;
+                
+                audio.onloadeddata = () => console.log('Audio loaded successfully');
+                audio.onerror = (e) => console.error('Audio error:', e);
+                
+                audioElement.appendChild(label);
+                audioElement.appendChild(audio);
+                
+                const audioList = document.getElementById('audio-list');
+                audioList.appendChild(audioElement);
+                console.log('Added audio element to list');
+                
+                // Clean up
+                stream.getTracks().forEach(track => track.stop());
                 nameInput.value = '';
             };
 
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event);
+                alert('Recording error: ' + event.error);
+            };
+
+            // Start recording
             mediaRecorder.start();
+            console.log('MediaRecorder started');
             isRecording = true;
             recordButton.textContent = 'Stop';
-            statusElement.textContent = '🔴 Recording...';
-            recordButton.classList.add('recording');
+            statusElement.textContent = 'Recording...';
+            
         } catch (err) {
-            console.error('Error accessing microphone:', err);
-            alert('Error accessing microphone');
+            console.error('MediaRecorder setup error:', err);
+            alert(`Recording error: ${err.message}`);
         }
     } else {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        isRecording = false;
+        console.log('Stopping recording...');
+        // Only try to stop if mediaRecorder exists and is recording
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            console.log('MediaRecorder stop called');
+        }
         recordButton.textContent = 'Record';
         statusElement.textContent = '';
-        recordButton.classList.remove('recording');
+        isRecording = false;
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        
+        // Stop all tracks on the active stream
+        if (mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
     }
 }
 
@@ -108,53 +190,71 @@ function addAudioToList(name, url) {
 
 function setupCanvas(img) {
     const canvas = document.getElementById('drawing-canvas');
-    const audio = document.getElementById('box-audio');
+    const ctx = canvas.getContext('2d');
+    
+    // Make canvas same size as image
     canvas.width = img.width;
     canvas.height = img.height;
     
-    const ctx = canvas.getContext('2d');
+    // Prevent default touch actions on canvas (prevents scrolling while drawing)
+    canvas.style.touchAction = 'none';
     
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', endDrawing);
-    canvas.addEventListener('mouseout', endDrawing);
-    
-    function handleMouseDown(e) {
+    if (isTouchDevice) {
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        canvas.addEventListener('touchend', handleEnd, { passive: false });
+        canvas.addEventListener('touchcancel', handleEnd, { passive: false });
+    } else {
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('mouseout', endDrawing);
+    }
+
+    function handleStart(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
         
-        // Check if click is inside any existing box
-        const clickedBox = boundingBoxes.find(box => 
-            clickX >= box.x && 
-            clickX <= box.x + box.width &&
-            clickY >= box.y && 
-            clickY <= box.y + box.height
+        // Calculate touch position relative to canvas
+        startX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+        startY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Check if touch is inside any existing box
+        const touchedBox = boundingBoxes.find(box => 
+            startX >= box.x && 
+            startX <= box.x + box.width &&
+            startY >= box.y && 
+            startY <= box.y + box.height
         );
         
-        if (clickedBox && clickedBox.audioUrl) {
-            const audio = new Audio(clickedBox.audioUrl);
+        if (touchedBox && touchedBox.audioUrl) {
+            // Play audio if box has associated audio
+            const audio = new Audio(touchedBox.audioUrl);
             audio.play();
-        } else if (!clickedBox) {
-            // Start drawing new box only if not clicking an existing box
+        } else {
+            // Start drawing new box
             isDrawing = true;
-            startX = clickX;
-            startY = clickY;
+            console.log('Drawing started at:', startX, startY);
         }
     }
-    
-    function draw(e) {
+
+    function handleMove(e) {
         if (!isDrawing) return;
+        e.preventDefault();
         
+        const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
-        const currentX = e.clientX - rect.left;
-        const currentY = e.clientY - rect.top;
         
-        // Clear the canvas and redraw all existing boxes
+        // Calculate current touch position
+        const currentX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+        const currentY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Clear canvas and redraw
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawExistingBoxes();
         
-        // Draw the current box
+        // Draw current box
         ctx.strokeStyle = 'red';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -165,38 +265,147 @@ function setupCanvas(img) {
             currentY - startY
         );
         ctx.stroke();
+        
+        console.log('Drawing box:', startX, startY, currentX - startX, currentY - startY);
     }
-    
-    function endDrawing(e) {
+
+    function handleEnd(e) {
         if (!isDrawing) return;
+        e.preventDefault();
         
+        const touch = e.changedTouches[0];
         const rect = canvas.getBoundingClientRect();
-        const endX = e.clientX - rect.left;
-        const endY = e.clientY - rect.top;
         
-        // Save the box without audio first
-        currentBoxIndex = boundingBoxes.length;
-        boundingBoxes.push({
-            x: Math.min(startX, endX),
-            y: Math.min(startY, endY),
-            width: Math.abs(endX - startX),
-            height: Math.abs(endY - startY),
-            audioUrl: null,
-            audioName: null
-        });
+        // Calculate end position
+        const endX = (touch.clientX - rect.left) * (canvas.width / rect.width);
+        const endY = (touch.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Only create box if it has some size
+        const width = Math.abs(endX - startX);
+        const height = Math.abs(endY - startY);
+        
+        if (width > 5 && height > 5) {  // Minimum size threshold
+            currentBoxIndex = boundingBoxes.length;
+            boundingBoxes.push({
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                width: width,
+                height: height,
+                audioUrl: null,
+                audioName: null
+            });
+            
+            console.log('Box created:', boundingBoxes[currentBoxIndex]);
+            showAudioSelection();
+        } else {
+            // If box is too small, just clear it
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawExistingBoxes();
+        }
         
         isDrawing = false;
-        showAudioSelection();
     }
-    
+
     function drawExistingBoxes() {
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = 2;
         boundingBoxes.forEach(box => {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.rect(box.x, box.y, box.width, box.height);
             ctx.stroke();
         });
+    }
+
+    function handleMouseDown(e) {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        
+        // Calculate mouse position relative to canvas
+        startX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        startY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Check if click is inside any existing box
+        const clickedBox = boundingBoxes.find(box => 
+            startX >= box.x && 
+            startX <= box.x + box.width &&
+            startY >= box.y && 
+            startY <= box.y + box.height
+        );
+        
+        if (clickedBox && clickedBox.audioUrl) {
+            // Play audio if box has associated audio
+            const audio = new Audio(clickedBox.audioUrl);
+            audio.play();
+        } else {
+            // Start drawing new box
+            isDrawing = true;
+            console.log('Drawing started at:', startX, startY);
+        }
+    }
+
+    function handleMouseMove(e) {
+        if (!isDrawing) return;
+        e.preventDefault();
+        
+        const rect = canvas.getBoundingClientRect();
+        
+        // Calculate current mouse position
+        const currentX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const currentY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Clear canvas and redraw
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawExistingBoxes();
+        
+        // Draw current box
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(
+            startX,
+            startY,
+            currentX - startX,
+            currentY - startY
+        );
+        ctx.stroke();
+        
+        console.log('Drawing box:', startX, startY, currentX - startX, currentY - startY);
+    }
+
+    function handleMouseUp(e) {
+        if (!isDrawing) return;
+        e.preventDefault();
+        
+        const rect = canvas.getBoundingClientRect();
+        
+        // Calculate end position
+        const endX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const endY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        
+        // Only create box if it has some size
+        const width = Math.abs(endX - startX);
+        const height = Math.abs(endY - startY);
+        
+        if (width > 5 && height > 5) {  // Minimum size threshold
+            currentBoxIndex = boundingBoxes.length;
+            boundingBoxes.push({
+                x: Math.min(startX, endX),
+                y: Math.min(startY, endY),
+                width: width,
+                height: height,
+                audioUrl: null,
+                audioName: null
+            });
+            
+            console.log('Box created:', boundingBoxes[currentBoxIndex]);
+            showAudioSelection();
+        } else {
+            // If box is too small, just clear it
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawExistingBoxes();
+        }
+        
+        isDrawing = false;
     }
 }
 
@@ -239,4 +448,110 @@ document.getElementById('cancel-box').addEventListener('click', () => {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawExistingBoxes();
+});
+
+// Add this helper function to check browser compatibility
+function checkBrowserCompatibility() {
+    console.log('MediaRecorder supported:', !!window.MediaRecorder);
+    console.log('getUserMedia supported:', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    if (window.MediaRecorder) {
+        console.log('Supported MIME types:');
+        ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].forEach(mimeType => {
+            console.log(`${mimeType}: ${MediaRecorder.isTypeSupported(mimeType)}`);
+        });
+    }
+}
+
+// Call this when the page loads
+document.addEventListener('DOMContentLoaded', checkBrowserCompatibility);
+
+// Add this helper function to display the audio list
+function updateAudioList() {
+    const audioList = document.getElementById('audio-list');
+    audioList.innerHTML = ''; // Clear current list
+    
+    recordedAudios.forEach((audio, index) => {
+        const audioElement = document.createElement('div');
+        audioElement.className = 'audio-item';
+        
+        const label = document.createElement('span');
+        label.textContent = audio.name;
+        
+        const audioPlayer = document.createElement('audio');
+        audioPlayer.controls = true;
+        audioPlayer.src = audio.url;
+        
+        audioElement.appendChild(label);
+        audioElement.appendChild(audioPlayer);
+        audioList.appendChild(audioElement);
+    });
+}
+
+// Add some basic styles to make sure the audio list is visible
+document.head.insertAdjacentHTML('beforeend', `
+    <style>
+        .audio-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+        }
+        .audio-item span {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        #audio-list {
+            margin-top: 20px;
+        }
+    </style>
+`);
+
+// Add this CSS to ensure the canvas is properly sized on mobile
+document.head.insertAdjacentHTML('beforeend', `
+    <style>
+        #drawing-canvas {
+            touch-action: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .image-container {
+            position: relative;
+            width: 100%;
+            height: auto;
+        }
+        
+        #uploaded-image {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+    </style>
+`);
+
+document.getElementById('choose-file-btn').addEventListener('click', () => {
+    document.getElementById('image-input').click();
+});
+
+document.getElementById('image-input').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = document.getElementById('uploaded-image');
+            img.src = e.target.result;
+            img.style.display = 'block';
+            document.getElementById('choose-file-btn').style.display = 'none';
+            
+            // Set up canvas after image loads
+            img.onload = function() {
+                setupCanvas(img);
+            };
+        };
+        reader.readAsDataURL(file);
+    }
 });
